@@ -3,11 +3,24 @@ import os
 import glob
 import random
 import torch
+import re
 
 from typing import List, NamedTuple, Type
 from libero.libero import get_libero_path
 from libero.libero.benchmark.libero_suite_task_map import libero_task_map
+import libero.libero.envs.bddl_utils as BDDLUtils
 
+
+CATEGORY_MAPPING = {
+    "background": "Background Textures",
+    "robot": "Robot Initial States",
+    "camera": "Camera Viewpoints",
+    "language": "Language Instructions",
+    "noise": "Sensor Noise",
+    "object": "Objects Layout",
+    "light": "Light Conditions",
+
+}
 BENCHMARK_MAPPING = {}
 
 
@@ -41,16 +54,33 @@ class Task(NamedTuple):
     init_states_file: str
 
 
-def grab_language_from_filename(x):
-    if x[0].isupper():  # LIBERO-100
-        if "SCENE10" in x:
-            language = " ".join(x[x.find("SCENE") + 8 :].split("_"))
+def grab_language_from_filename(suite_name, x):
+    if "_language_" not in x:
+        if x[0].isupper():  # LIBERO-100
+            if "SCENE10" in x:
+                language = " ".join(x[x.find("SCENE") + 8 :].split("_"))
+            else:
+                language = " ".join(x[x.find("SCENE") + 7 :].split("_"))
         else:
-            language = " ".join(x[x.find("SCENE") + 7 :].split("_"))
+            language = " ".join(x.split("_"))
+        en = language.find(".bddl")
+        return language[:en]
     else:
-        language = " ".join(x.split("_"))
-    en = language.find(".bddl")
-    return language[:en]
+        if "_view_" in x:
+            bddl_file_path = os.path.join(
+                get_libero_path("bddl_files"),
+                suite_name,
+                x.split("_view_")[0]+'.bddl',
+            )
+        else:
+            bddl_file_path = os.path.join(
+                get_libero_path("bddl_files"),
+                suite_name,
+                x,
+            )
+        # print("bddl_file_path:", bddl_file_path)
+        problem_info = BDDLUtils.get_problem_info(bddl_file_path)
+        return problem_info["language_instruction"]
 
 
 libero_suites = [
@@ -66,7 +96,7 @@ for libero_suite in libero_suites:
     task_maps[libero_suite] = {}
 
     for task in libero_task_map[libero_suite]:
-        language = grab_language_from_filename(task + ".bddl")
+        language = grab_language_from_filename(libero_suite, task + ".bddl")
         task_maps[libero_suite][task] = Task(
             name=task,
             language=language,
@@ -79,47 +109,86 @@ for libero_suite in libero_suites:
         # print(language, "\n", f"{task}.bddl", "\n")
         # print("")
 
+def get_ids_by_category(category_value):
+    """
+    Retrieve the list of matching IDs from all suites based on the given category value.
 
-task_orders = [
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    [4, 6, 8, 7, 3, 1, 2, 0, 9, 5],
-    [6, 3, 5, 0, 4, 2, 9, 1, 8, 7],
-    [7, 4, 3, 0, 8, 1, 2, 5, 9, 6],
-    [4, 5, 6, 3, 8, 0, 2, 7, 1, 9],
-    [1, 2, 3, 0, 6, 9, 5, 7, 4, 8],
-    [3, 7, 8, 1, 6, 2, 9, 4, 0, 5],
-    [4, 2, 9, 7, 6, 8, 5, 1, 3, 0],
-    [1, 8, 5, 4, 0, 9, 6, 7, 2, 3],
-    [8, 3, 6, 4, 9, 5, 1, 2, 0, 7],
-    [6, 9, 0, 5, 7, 1, 2, 8, 3, 4],
-    [6, 8, 3, 1, 0, 2, 5, 9, 7, 4],
-    [8, 0, 6, 9, 4, 1, 7, 3, 2, 5],
-    [3, 8, 6, 4, 2, 5, 0, 7, 1, 9],
-    [7, 1, 5, 6, 3, 2, 8, 9, 4, 0],
-    [2, 0, 9, 5, 3, 6, 8, 7, 1, 4],
-    [3, 5, 9, 6, 2, 4, 8, 7, 1, 0],
-    [7, 6, 5, 9, 0, 3, 4, 2, 8, 1],
-    [2, 5, 0, 9, 3, 1, 6, 4, 8, 7],
-    [3, 5, 1, 2, 7, 8, 6, 0, 4, 9],
-    [3, 4, 1, 9, 7, 6, 8, 2, 0, 5],
-]
+    Args:
+        category_value (str): The category value to query, e.g., "Background Textures".
+        Valid category values include:
+            - Background Textures
+            - Camera Viewpoints
+            - Language Instructions
+            - Light Conditions
+            - Objects Layout
+            - Robot Initial States
+            - Sensor Noise
 
+    Returns:
+        dict: A dictionary in the format {suite_name: [id1, id2, ...]}.
+    """
+    import json
+    # read json classification file
+    # TODO: change path here
+    category_value = CATEGORY_MAPPING[category_value]
+    with open('TOCHANGE/LIBERO-plus/libero/libero/benchmark/task_classification.json', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    result = {}
+    
+    for suite_name, tasks in data.items():
+        matching_ids = [
+            task['id'] 
+            for task in tasks 
+            if task.get('category') == category_value
+        ]
+        
+        if matching_ids:
+            result[suite_name] = [matching_ids]
+            for _ in range(19):
+                random.shuffle(matching_ids)
+                result[suite_name].append(matching_ids)
+    
+    return result
+
+"""suite_order = ["libero_spatial", "libero_object", "libero_distractors", "libero_goal", "libero_10", "libero_90"]
+task_num = [2402, 2518, 40, 2591, 2519, 90]
+task_order_dict = dict()
+
+for idx in range(len(task_num)):
+    task_orders = [list(range(0,task_num[idx]))]
+    for _ in range(19):
+        order = list(range(0,task_num[idx]))
+        random.shuffle(order)
+        task_orders.append(order)
+    task_order_dict[suite_order[idx]] = task_orders"""
 
 class Benchmark(abc.ABC):
     """A Benchmark."""
 
-    def __init__(self, task_order_index=0):
+    def __init__(self, task_order_index=0, category_value="object"):
         self.task_embs = None
         self.task_order_index = task_order_index
+        print("-------LIBERO-PLUS-CATEGORY:", category_value)
+        self.task_order_dict = get_ids_by_category(category_value)
+
 
     def _make_benchmark(self):
-        tasks = list(task_maps[self.name].values())
-        if self.name == "libero_90":
-            self.tasks = tasks
+        if self.name != "libero_mix":
+            tasks = list(task_maps[self.name].values())
+            print(f"[info] using task orders {self.task_order_dict[self.name][self.task_order_index]}")
+            self.tasks = [tasks[i] for i in self.task_order_dict[self.name][self.task_order_index]]
+            self.n_tasks = len(self.tasks)
         else:
-            print(f"[info] using task orders {task_orders[self.task_order_index]}")
-            self.tasks = [tasks[i] for i in task_orders[self.task_order_index]]
-        self.n_tasks = len(self.tasks)
+            self.tasks = []
+            for each_suite in self.task_order_dict.keys():
+                tasks = list(task_maps[each_suite].values())
+                self.tasks.extend([tasks[i] for i in self.task_order_dict[each_suite][self.task_order_index] if i in range(0, len(tasks))])
+            self.n_tasks = len(self.tasks)
+        """tasks = list(task_maps[self.name].values())
+        print(f"[info] using task orders {task_order_dict[self.name][self.task_order_index]}")
+        self.tasks = [tasks[i] for i in task_order_dict[self.name][self.task_order_index]]
+        self.n_tasks = len(self.tasks)"""
 
     def get_num_tasks(self):
         return self.n_tasks
@@ -155,13 +224,91 @@ class Benchmark(abc.ABC):
     def get_task_emb(self, i):
         return self.task_embs[i]
 
-    def get_task_init_states(self, i):
-        init_states_path = os.path.join(
-            get_libero_path("init_states"),
-            self.tasks[i].problem_folder,
-            self.tasks[i].init_states_file,
-        )
+    def get_task_init_states_ori(self, i):
+        if "_table_" in self.tasks[i].init_states_file:
+            init_states_path = os.path.join(
+                get_libero_path("init_states"),
+                self.tasks[i].problem_folder,
+                self.tasks[i].init_states_file.split("_table_")[0] + "." + self.tasks[i].init_states_file.split(".")[-1],
+            )
+        elif "_tb_" in self.tasks[i].init_states_file:
+            init_states_path = os.path.join(
+                get_libero_path("init_states"),
+                self.tasks[i].problem_folder,
+                self.tasks[i].init_states_file.split("_tb_")[0] + "." + self.tasks[i].init_states_file.split(".")[-1],
+            )
+        elif "_view_" in self.tasks[i].init_states_file:
+            init_states_path = os.path.join(
+                get_libero_path("init_states"),
+                self.tasks[i].problem_folder,
+                self.tasks[i].init_states_file.split("_view_")[0] + "." + self.tasks[i].init_states_file.split(".")[-1],
+            )
+        else:
+            init_states_path = os.path.join(
+                get_libero_path("init_states"),
+                self.tasks[i].problem_folder,
+                self.tasks[i].init_states_file,
+            )
+
         init_states = torch.load(init_states_path)
+        return init_states
+    
+    def get_task_init_states(self, i):
+        # print("======", re.sub(r'_table_\d+$', '', self.tasks[i].init_states_file))
+        # print("====init_states_path=====", self.tasks[i].init_states_file)
+        if "_language_" in self.tasks[i].init_states_file:
+            init_states_path = os.path.join(
+                get_libero_path("init_states"),
+                self.tasks[i].problem_folder,
+                self.tasks[i].init_states_file.split("_language_")[0] + "." + self.tasks[i].init_states_file.split(".")[-1],
+            )
+        else:
+            if "_view_" in self.tasks[i].init_states_file:
+                init_states_path = os.path.join(
+                    get_libero_path("init_states"),
+                    self.tasks[i].problem_folder,
+                    self.tasks[i].init_states_file.split("_view_")[0] + "." + self.tasks[i].init_states_file.split(".")[-1],
+                )
+            else:
+                if "_table_" in self.tasks[i].init_states_file:
+                    init_states_path = os.path.join(
+                        get_libero_path("init_states"),
+                        self.tasks[i].problem_folder,
+                        re.sub(r'_table_\d+', '', self.tasks[i].init_states_file),
+                    )
+                if "_tb_" in self.tasks[i].init_states_file:
+                    init_states_path = os.path.join(
+                        get_libero_path("init_states"),
+                        self.tasks[i].problem_folder,
+                        re.sub(r'_tb_\d+', '', self.tasks[i].init_states_file),
+                    )
+                
+                if "_light_" in self.tasks[i].init_states_file:
+                    init_states_path = os.path.join(
+                        get_libero_path("init_states"),
+                        self.tasks[i].problem_folder,
+                        self.tasks[i].init_states_file.split("_light_")[0] + "." + self.tasks[i].init_states_file.split(".")[-1],
+                    )
+                
+                if "_add_" in self.tasks[i].init_states_file or "_level" in self.tasks[i].init_states_file:
+                    init_states_path = os.path.join(
+                        get_libero_path("init_states"),
+                        "libero_newobj",
+                        self.tasks[i].problem_folder,
+                        self.tasks[i].init_states_file,
+                    )
+        # else:
+        #     init_states_path = os.path.join(
+        #         get_libero_path("init_states"),
+        #         self.tasks[i].problem_folder,
+        #         self.tasks[i].init_states_file,
+        #     )
+        
+        # print("====init_states_path=====", init_states_path)
+
+        init_states = torch.load(init_states_path)
+        if "_add_" in self.tasks[i].init_states_file or "_level" in self.tasks[i].init_states_file:
+            init_states = init_states.reshape(1, -1)
         return init_states
 
     def set_task_embs(self, task_embs):
@@ -170,32 +317,32 @@ class Benchmark(abc.ABC):
 
 @register_benchmark
 class LIBERO_SPATIAL(Benchmark):
-    def __init__(self, task_order_index=0):
-        super().__init__(task_order_index=task_order_index)
+    def __init__(self, task_order_index=0, category_value="object"):
+        super().__init__(task_order_index=task_order_index, category_value=category_value)
         self.name = "libero_spatial"
         self._make_benchmark()
 
 
 @register_benchmark
 class LIBERO_OBJECT(Benchmark):
-    def __init__(self, task_order_index=0):
-        super().__init__(task_order_index=task_order_index)
+    def __init__(self, task_order_index=0, category_value="object"):
+        super().__init__(task_order_index=task_order_index, category_value=category_value)
         self.name = "libero_object"
         self._make_benchmark()
 
 
 @register_benchmark
 class LIBERO_GOAL(Benchmark):
-    def __init__(self, task_order_index=0):
-        super().__init__(task_order_index=task_order_index)
+    def __init__(self, task_order_index=0, category_value="object"):
+        super().__init__(task_order_index=task_order_index, category_value=category_value)
         self.name = "libero_goal"
         self._make_benchmark()
 
 
 @register_benchmark
 class LIBERO_90(Benchmark):
-    def __init__(self, task_order_index=0):
-        super().__init__(task_order_index=task_order_index)
+    def __init__(self, task_order_index=0, category_value="object"):
+        super().__init__(task_order_index=task_order_index, category_value=category_value)
         assert (
             task_order_index == 0
         ), "[error] currently only support task order for 10-task suites"
@@ -205,15 +352,22 @@ class LIBERO_90(Benchmark):
 
 @register_benchmark
 class LIBERO_10(Benchmark):
-    def __init__(self, task_order_index=0):
-        super().__init__(task_order_index=task_order_index)
+    def __init__(self, task_order_index=0, category_value="object"):
+        super().__init__(task_order_index=task_order_index, category_value=category_value)
         self.name = "libero_10"
         self._make_benchmark()
 
 
 @register_benchmark
 class LIBERO_100(Benchmark):
-    def __init__(self, task_order_index=0):
-        super().__init__(task_order_index=task_order_index)
+    def __init__(self, task_order_index=0, category_value="object"):
+        super().__init__(task_order_index=task_order_index, category_value=category_value)
         self.name = "libero_100"
+        self._make_benchmark()
+
+@register_benchmark
+class LIBERO_MIX(Benchmark):
+    def __init__(self, task_order_index=0, category_value="object"):
+        super().__init__(task_order_index=task_order_index, category_value=category_value)
+        self.name = "libero_mix"
         self._make_benchmark()
