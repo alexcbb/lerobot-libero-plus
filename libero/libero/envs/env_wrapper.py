@@ -12,13 +12,13 @@ import time
 from io import BytesIO
 import cv2
 import ctypes
-from wand.api import library as wandlibrary
-from wand.image import Image as WandImage
+# from wand.api import library as wandlibrary
+# from wand.image import Image as WandImage
 from skimage.filters import gaussian
 from scipy.ndimage import zoom as scizoom
 
 # Tell Python about the C method
-wandlibrary.MagickMotionBlurImage.argtypes = (ctypes.c_void_p,  # wand
+"""wandlibrary.MagickMotionBlurImage.argtypes = (ctypes.c_void_p,  # wand
                                               ctypes.c_double,  # radius
                                               ctypes.c_double,  # sigma
                                               ctypes.c_double)  # angle
@@ -56,7 +56,7 @@ def motion_blur(x, severity=1):
         return np.clip(x[..., [2, 1, 0]], 0, 255)  # BGR to RGB
     else:  # greyscale to RGB
         return np.clip(np.array([x, x, x]).transpose((1, 2, 0)), 0, 255)
-
+"""
 def gaussian_blur(x, severity=1):
     c = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][severity - 1]
 
@@ -292,7 +292,7 @@ class ControlEnv:
                 img_array = (img_array * 255).astype(np.uint8)
             pil_image = Image.fromarray(img_array)
             if self.noise <= 10:
-                blurred_array = motion_blur(pil_image, severity=self.noise)
+                blurred_array = pil_image# motion_blur(pil_image, severity=self.noise)
             elif self.noise <= 20:
                 blurred_array = gaussian_blur(pil_image, severity=self.noise-10)
                 blurred_array = blurred_array.astype(np.uint8)
@@ -328,7 +328,7 @@ class ControlEnv:
                 pil_image = Image.fromarray(img_array)
 
                 if self.noise <= 10:
-                    blurred_array = motion_blur(pil_image, severity=self.noise)
+                    blurred_array = pil_image# motion_blur(pil_image, severity=self.noise)
                 elif self.noise <= 20:
                     blurred_array = gaussian_blur(pil_image, severity=self.noise-10)
                     blurred_array = blurred_array.astype(np.uint8)
